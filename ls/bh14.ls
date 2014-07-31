@@ -1,3 +1,5 @@
+prelude = require 'prelude-ls'
+
 # Helpers
 
 V3    = (x,y,z) -> new THREE.Vector3(x,y,z)
@@ -157,7 +159,7 @@ class VisState
     defaultParams = ({} <<< Vis.triBaseDefaultParams) <<< Vis.miscDefaultParams
     @params = defaultParams <<< (@params || {})
 
-    @seqs = [new ShearSequence(), new TranslateSequence(), new SidestepSequence()]
+    @seqs = [new CircleSequence(), new ShearSequence(), new TranslateSequence(), new SidestepSequence()]
     @activeSeqIndex = 0
     # @activeSeqSetup = false
     @nextSeqIndex   = 0
@@ -176,6 +178,7 @@ class VisState
       @seqs[@activeSeqIndex].setup this
       @nextSeqIndex = void
       @nextSeqStart = void
+      @phase        = @phase % (BEATS_PER_BAR * @tpb)
 
     @seqs[@activeSeqIndex].step this
 
@@ -301,46 +304,46 @@ class Sequence
 
 
 
-class ManualSequence extends Sequence
-  # ->
-  #   super @defaultParams!
+# class ManualSequence extends Sequence
+#   # ->
+#   #   super @defaultParams!
 
-  defaultParams: ->
-    oddExtra  : 1.0
-    staggerAB : 1.0
-    staggerA  : 1.0
-    staggerB  : 1.0
+#   defaultParams: ->
+#     oddExtra  : 1.0
+#     staggerAB : 1.0
+#     staggerA  : 1.0
+#     staggerB  : 1.0
 
-  step: (visState) ->
-    params    = visState.params
-    stagger   = @triBaseLength / 2 * params.staggerAB
-    oddExtra  = params.oddExtra #1.0
+#   step: (visState) ->
+#     params    = visState.params
+#     stagger   = @triBaseLength / 2 * params.staggerAB
+#     oddExtra  = params.oddExtra #1.0
 
-    updateMesh = (mesh, cx,cy) !~>
-      # stagger2 = stagger * (1 + (cx<0 ? -cx : cx) * 0.1)
-      cxp       = cx
-      # cxp       = Math.pow cx, 1.1
-      mx        = | cy % 2 is 0 => cxp * stagger * params.staggerA
-                  | _           => (cxp + oddExtra) * stagger * params.staggerB
-      my        = cy * @triBaseHeight
-      color     = 0xffffff
-      visible   = true
+#     updateMesh = (mesh, cx,cy) !~>
+#       # stagger2 = stagger * (1 + (cx<0 ? -cx : cx) * 0.1)
+#       cxp       = cx
+#       # cxp       = Math.pow cx, 1.1
+#       mx        = | cy % 2 is 0 => cxp * stagger * params.staggerA
+#                   | _           => (cxp + oddExtra) * stagger * params.staggerB
+#       my        = cy * @triBaseHeight
+#       color     = 0xffffff
+#       visible   = true
 
-      # visible = cx % 2 == 0
-      # visible =
-      #   | cy % 2 == 0 => cx % 8 != 3
-      #   | _           => cx % 8 == 1
-      color = 0x00ffff if cx % 2 == 0
-      color = 0x000000 if cx != 0
+#       # visible = cx % 2 == 0
+#       # visible =
+#       #   | cy % 2 == 0 => cx % 8 != 3
+#       #   | _           => cx % 8 == 1
+#       color = 0x00ffff if cx % 2 == 0
+#       color = 0x000000 if cx != 0
 
-      mesh
-        ..position.set mx, my, 0        if mesh.position.x != mx || mesh.position.y != my
-        ..visible = visible             if mesh.visible != visible
-        ..material.color.setHex(color)  if mesh.material.color.getHex! != color
-        # ..rotation.z = mesh.rotation.z + 0.01
-        # ..renderDepth = 10 + (cx % 2)
+#       mesh
+#         ..position.set mx, my, 0        if mesh.position.x != mx || mesh.position.y != my
+#         ..visible = visible             if mesh.visible != visible
+#         ..material.color.setHex(color)  if mesh.material.color.getHex! != color
+#         # ..rotation.z = mesh.rotation.z + 0.01
+#         # ..renderDepth = 10 + (cx % 2)
 
-    visState.trisByCoord updateMesh
+#     visState.trisByCoord updateMesh
 
 class SidestepSequence extends Sequence
   defaultParams: ->
@@ -355,7 +358,7 @@ class SidestepSequence extends Sequence
     beat = visState.vBeat % 4
     
     updateMesh = (mesh, cx,cy) !~>
-      mesh.rotation.z = angle
+      # mesh.rotation.z = angle
       # return unless cy % 2 == 0
       
       # (mod cx, 4) == beat
@@ -451,6 +454,56 @@ class TranslateSequence extends Sequence
     }
 
     visState.trisByCoord updater
+
+class CircleSequence extends Sequence
+  defaultParams: -> {
+    minHWidth: 0.5,
+    maxHWidth: 3.0,
+    pulse: false
+  }
+
+  setup: (visState) ->
+    visState.trisByCoord @buildBasicGridUpdater!
+
+  step: (visState) ->
+    beat    = visState.vBeat
+    barNum  = Math.floor(visState.vBar)
+    beat8norm = (beat % 8) / 8.0
+    beat8normPingPong = (if barNum % 2 == 0 then beat8norm else 1.0 - beat8norm)
+    R         = 30.0
+
+    # Radii and Colors
+    # rcs     = [ [beat8norm * R, 0xff0000] ]
+    # rcs     = [ [(beat8norm + 0.25 * i) * R, 0x00ffff] for i from 0 til 3 ]
+    # rcs     = [ [(beat8norm + 0.25 * (Math.exp(2,i) - 1)) * R, 0x00ffff] for i from 0 til 3 ]
+    cs      = [ 0x007777, 0x009999, 0x00bbbb, 0x00ffff, 0x00bbbb, 0x009999, 0x007777 ]
+    rcs     = [ [(beat8norm + 0.25 * i) * R, cs[i+3]] for i from -3 to 3 ]
+    rcs.length -= 3 if visState.vBar < 2.0 # Hide the 'negative' rings in the first iteration
+    
+    # Half width of the rings
+    # hWidth  = beat8normPingPong * 2.5 + 0.5
+    hWidth  = beat8normPingPong * (@params.maxHWidth - @params.minHWidth) + @params.minHWidth
+
+    basicUpdater = @buildBasicGridUpdater {
+      # staggerAB: (beat % 8) / 4.0 + 1.0,
+      # staggerAB: (beat % 8) / 8.0 + 1.0,
+      staggerAB: if @params.pulse then beat8normPingPong * 0.5 + 1.1 else 1.2,
+      # xAddFunc: (cx,cy) -> ...
+    }
+
+    visState.trisByCoord (mesh, cx,cy) ->
+      basicUpdater mesh, cx,cy
+
+      # return unless cx % 2 == 0
+      # color = if barNum % 2 == 0 then 0xff0000 else 0x00ff00
+
+      d = Math.sqrt(cx*cx + cy*cy)
+      f = ([r,c]) -> (r >= 0) && (d > r - hWidth && d < r + hWidth)
+
+      foundRc = prelude.find f, rcs
+      color   = if foundRc then foundRc[1] else 0x000000
+
+      mesh.material.color.setHex color if mesh.material.color.getHex isnt color
 
 
 
@@ -608,6 +661,12 @@ main = !->
         ..add(visState.params.effects, 'bloom').onFinishChange refreshEffectPasses
         ..add(visState.params.effects, 'dotScreen').onFinishChange refreshEffectPasses
         ..add(visState.params.effects, 'glitch').onFinishChange refreshEffectPasses
+
+    console.log visState.seqs[0]
+    for seq in visState.seqs
+      folder = visStateGui.addFolder(seq.constructor.displayName)
+      for k,v of seq.params
+        folder.add(seq.params, k)
 
     # Listeners
 
