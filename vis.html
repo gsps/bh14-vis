@@ -1,0 +1,68 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>three.js webgl - postprocessing - digital glitch</title>
+    <meta charset="utf-8">
+    <style>
+      body {
+        margin: 0px;
+        background-color: #000000;
+        overflow: hidden;
+      }
+
+      #header {
+        position: absolute;
+        z-index: 10;
+        color: #fff;
+        font-family: monospace;
+        text-align: center;
+        margin: 10px;
+        width: 100%;
+      }
+
+      #header label, #header input {
+        cursor: pointer;
+      }
+
+      #renderArea {
+        position: absolute;
+        top: 56px;
+        left: 0px;
+        width: 1024px; height: 576px; /*1280x720 * 0.8*/
+        /*width: 640px; height: 320px; 1280x720 * 0.5*/
+      }
+    </style>
+  </head>
+  <body>
+
+    <script src="three.min.js"></script>
+    <script src="js/stats.min.js"></script>
+    <script src="js/dat.gui.min.js"></script>
+    <script src="js/jshashtable-3.0.js"></script>
+    <script src="js/Tween.js"></script>
+
+    <script src="js/shaders/CopyShader.js"></script>
+    <script src="js/shaders/DigitalGlitch.js"></script>
+    <script src="js/shaders/ConvolutionShader.js"></script>
+    <script src="js/shaders/DotScreenShader.js"></script>
+    <script src="js/shaders/FXAAShader.js"></script>
+
+    <script src="js/postprocessing/EffectComposer.js"></script>
+    <script src="js/postprocessing/RenderPass.js"></script>
+    <script src="js/postprocessing/MaskPass.js"></script>
+    <script src="js/postprocessing/ShaderPass.js"></script>
+    <script src="js/postprocessing/BloomPass.js"></script>
+    <script src="js/postprocessing/GlitchPass.js"></script>
+    <script src="js/postprocessing/DotScreenPass.js"></script>
+
+    <!-- <div id="header">
+      <label for="dotScreen">Glitch me wild:</label><input id="wildGlitch" type="checkbox" onchange="updateOptions()"/><br />
+      <span>
+    </div> -->
+
+    <div id="renderArea"></div>
+
+    <script src="ls/bh14.js"></script>
+  </body>
+</html>
