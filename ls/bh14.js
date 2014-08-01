@@ -522,7 +522,7 @@
     var stats, camera, scene, renderer, composer, object, light, renderPass, effectCopy, passes, passesOrder, visState, visStateGui, canvasWidth, canvasHeight, canvasRatio, cameraParams, perspCamActive, fetchCanvasSize, dpr, sampleRatio, init, onWindowResize, onKeyPress, rebuildTris, refreshEffectPasses, tLastStep;
     fetchCanvasSize = function(){
       var width;
-      width = 24;
+      width = 48;
       canvasWidth = document.getElementById('renderArea').clientWidth;
       canvasHeight = document.getElementById('renderArea').clientHeight;
       canvasRatio = canvasWidth / canvasHeight;

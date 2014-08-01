@@ -523,7 +523,8 @@ main = !->
 
   var canvasWidth, canvasHeight, canvasRatio, cameraParams, perspCamActive
   fetchCanvasSize = !->
-    width         = 24 #36
+    # width         = 24 #36
+    width         = 48
     canvasWidth   := document.getElementById(\renderArea).clientWidth #window.innerWidth
     canvasHeight  := document.getElementById(\renderArea).clientHeight #window.innerHeight
     canvasRatio   := canvasWidth / canvasHeight
