@@ -399,7 +399,7 @@ class WaveSequence extends Sequence
       mesh.rotation.y = 0
 
   step: (visState) ->
-    angle = visState.vBar * @params.rpBar * -2 * Math.PI
+    # angle = visState.vBar * @params.rpBar * -2 * Math.PI
     # beat = Math.floor(visState.vBeat)
     beat4 = visState.vBeat % 4
     

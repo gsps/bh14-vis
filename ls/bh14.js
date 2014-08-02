@@ -412,8 +412,7 @@
       });
     };
     prototype.step = function(visState){
-      var angle, beat4, updateMesh, this$ = this;
-      angle = visState.vBar * this.params.rpBar * -2 * Math.PI;
+      var beat4, updateMesh, this$ = this;
       beat4 = visState.vBeat % 4;
       updateMesh = function(mesh, cx, cy){
         var p, q, angle;
