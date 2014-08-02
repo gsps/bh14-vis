@@ -161,12 +161,26 @@ class VisState
     defaultParams = ({} <<< Vis.triBaseDefaultParams) <<< Vis.miscDefaultParams
     @params = defaultParams <<< (@params || {})
 
-    @seqs = [new MeteorSequence(), new WaveSequence(), new CircleSequence(), 
-      new ShearSequence(), new TranslateSequence(), new SidestepSequence()]
+    @seqs = [new KillSequence(), new MeteorSequence(), new WaveSequence(), 
+      new CircleSequence(), new ShearSequence(), new TranslateSequence(), 
+      new SidestepSequence()]
     @activeSeqIndex = void
     # @activeSeqSetup = false
     @nextSeqIndex   = 0
     @nextSeqStart   = 0
+
+    @strobeParams = 
+      double: false
+      a:
+        enabled: false
+        phase: 0.5
+        length: 0.2
+        # alpha: 0.01
+      b:
+        enabled: false
+        phase: 0.5
+        length: 0.2
+        # alpha: 0.01
 
   step: (dt) ->
     return this unless @running
@@ -182,7 +196,9 @@ class VisState
       @seqs[@activeSeqIndex].setup this
       @nextSeqIndex = void
       @nextSeqStart = void
-      @phase        = @phase % (BEATS_PER_BAR * @tpb)
+      # @phase        = @phase % (BEATS_PER_BAR * @tpb) # Barwise scheduling.
+      @phase = @time % (BEATS_PER_BAR * @tpb)
+      # @phase = @time
 
     @seqs[@activeSeqIndex].step this
 
@@ -191,7 +207,8 @@ class VisState
 
   scheduleSequence: (seqIndex) ->
     @nextSeqIndex = seqIndex
-    @nextSeqStart = @time + @tpb * BEATS_PER_BAR * (1.0 - @pBar)
+    # @nextSeqStart = @time + @tpb * BEATS_PER_BAR * (1.0 - @pBar) # Barwise scheduling.
+    @nextSeqStart = @time
 
   clearTris: !->
     # @tris = new Hashtable()
@@ -313,6 +330,15 @@ class Sequence
     return void unless vBeat >= a && vBeat <= b
     return (vBeat - a) / (b - a)
 
+  strobe: (vBeat, origColor, params) ->
+    return void unless params.enabled
+
+    strobeBeat = vBeat*2 if params.double
+
+    epsilon = Math.abs(vBeat - Math.floor(vBeat) - params.phase)
+    if epsilon > params.length then 0x000000 else void
+    # if epsilon > params.length then origColor * params.alpha else void
+
 
 
 # class ManualSequence extends Sequence
@@ -356,22 +382,25 @@ class Sequence
 
 #     visState.trisByCoord updateMesh
 
+class KillSequence extends Sequence
+  defaultParams: -> {}
+
+  setup: (visState) ->
+    visState.trisByCoord (mesh, cx,cy) ->
+      mesh.material.color.setHex 0x000000
+
+  teardown: (visState) ->
+    visState.trisByCoord @buildBasicGridUpdater!
+
 class SidestepSequence extends Sequence
   defaultParams: ->
     rpBar: 0.5
-    doubleStrobing: false
-    defaultColorStrobing: false
-    activeColorStrobing: false
-    defaultStrobePhase: 0.5
-    defaultStrobeLength: 0.2
-    activeStrobePhase: 0.5
-    activeStrobeLength: 0.2
     defaultColor: true
     activeColor: true
 
   setup: (visState) ->
     visState.trisByCoord @buildBasicGridUpdater!
-    visState.strobe = false
+    # visState.strobe = false
 
   step: (visState) ->
     angle = visState.vBar * @params.rpBar * -2 * Math.PI
@@ -383,45 +412,28 @@ class SidestepSequence extends Sequence
       # return unless cy % 2 == 0
       
       # (mod cx, 4) == beat
-      defaultColor = new THREE.Color 0xffffff #(if cx % 2 == 0 then 0x00ffff else 0xffffff)
-      activeColor  = new THREE.Color 0x00ffff #0x000000
+      # defaultColor = new THREE.Color 0xffffff #(if cx % 2 == 0 then 0x00ffff else 0xffffff)
+      # activeColor  = new THREE.Color 0x00ffff #0x000000
       
       # dist  = mod (cx - beat), 4 |> Math.abs |> clamp 0, 1
       dist0 = (mod cx, 4) - beat
       dist  = Math.min(dist0 |> Math.abs, dist0 + 4 |> Math.abs) |> clamp 0, 1
       
-      color = defaultColor.lerp activeColor, 1.0 - (dist/1.0)
+      # color = defaultColor.lerp activeColor, 1.0 - (dist/1.0)
+
+      # ^^ OLD ^^
 
 
       defaultColor = new THREE.Color (if @params.defaultColor then 0xffffff else 0x000000) #(if cx % 2 == 0 then 0x00ffff else 0xffffff)
       activeColor  = new THREE.Color (if @params.activeColor then 0x00ffff else 0x000000)
 
-      if @params.defaultColorStrobing
-        strobeBeat = beat
+      defaultStrobeColor = @strobe visState.vBeat, defaultColor.getHex!, visState.strobeParams.a
+      defaultColor = new THREE.Color defaultStrobeColor if defaultStrobeColor isnt void
 
-        if @params.doubleStrobing
-          strobeBeat = beat*2
+      activeStrobeColor = @strobe visState.vBeat, activeColor.getHex!, visState.strobeParams.b
+      activeColor = new THREE.Color activeStrobeColor if activeStrobeColor isnt void
 
-        epsilon = Math.abs(strobeBeat - Math.floor(strobeBeat) - @params.defaultStrobePhase)
-        strobe = epsilon < @params.defaultStrobeLength
-
-        if !strobe
-          defaultColor = new THREE.Color 0x000000
-
-      if @params.activeColorStrobing
-        strobeBeat = beat
-
-        if @params.doubleStrobing
-          strobeBeat = beat*2
-
-        epsilon = Math.abs(strobeBeat - Math.floor(strobeBeat) - @params.activeStrobePhase)
-        strobe = epsilon < @params.activeStrobeLength
-
-        if !strobe
-          activeColor = new THREE.Color 0x000000
-
-
-
+      
       color = defaultColor.lerp activeColor, 1.0 - (dist/1.0)
       mesh.material.color.set(color)
 
@@ -435,7 +447,6 @@ class WaveSequence extends Sequence
     visState.trisByCoord @buildBasicGridUpdater!
 
   teardown: (visState) ->
-    console.log \TEARDOWN
     visState.trisByCoord (mesh, cx,cy) ->
       mesh.rotation.y = 0
 
@@ -465,19 +476,12 @@ class WaveSequence extends Sequence
 
 class ShearSequence extends Sequence
   defaultParams: -> {
-    defaultColorStrobing: false,
-    activeColorStrobing: false,
-    doubleStrobing: false,
-    defaultStrobePhase: 0.5,
-    defaultStrobeLength: 0.2,
-    activeStrobePhase: 0.5,
-    activeStrobeLength: 0.2,
-    defaultColorAlpha: 0.01,
-    activeColorAlpha: 0.01
+    strobeAAlpha: 0.01,
+    strobeBAlpha: 0.01
   }
 
-  # setup: (visState) ->
-  #   visState.trisByCoord @buildBasicGridUpdater!
+  setup: (visState) ->
+    visState.trisByCoord @buildBasicGridUpdater!
 
   step: (visState) ->
     beat    = visState.vBeat
@@ -498,16 +502,6 @@ class ShearSequence extends Sequence
     expo1   = 1.0 + expo
 
 
-    strobing = @params.defaultColorStrobing
-    doubleStrobing = @params.doubleStrobing
-    activeColorStrobing = @params.activeColorStrobing
-    defaultStrobePhase = @params.defaultStrobePhase
-    defaultStrobeLength = @params.defaultStrobeLength
-    activeStrobePhase = @params.activeStrobePhase
-    activeStrobeLength = @params.activeStrobeLength
-    defaultColorAlpha = @params.defaultColorAlpha
-    activeColorAlpha = @params.activeColorAlpha
-
     p = @beatRangeProgress(beat%4, 0.0, 1.0) # 3.0, 4.0
     p0 = TWEEN.Easing.Quadratic.InOut(p || 0)
 
@@ -526,9 +520,11 @@ class ShearSequence extends Sequence
     # beat4 = beat % 4
     # beatY = ((beat % 4) - 3.0) * 10 |> Math.floor
 
-    visState.trisByCoord (mesh, cx,cy) ->
+    visState.trisByCoord (mesh, cx,cy) !~>
       basicUpdater mesh, cx,cy
       color = new THREE.Color (if cx % 2 == 0 then 0x00ffff else 0xffffff)
+
+      odd = (mod cx, 2) == 1
 
       # return unless barNum % 4 == 3
       # return unless onBar
@@ -537,41 +533,30 @@ class ShearSequence extends Sequence
       # if beatY >= -10 && cy == beatY * sign
       #   color = if cx % 2 == 0 then 0xff00ff else 0xffff00
       if p isnt void
-        color = new THREE.Color 0xff00ff if barNum % 4 == 1 && (mod cx, 2) == 0
-        color = new THREE.Color 0xffff00 if barNum % 4 == 3 && (mod cx, 2) == 1
+        color = new THREE.Color 0xff00ff if barNum % 4 == 1 && (not odd)
+        color = new THREE.Color 0xffff00 if barNum % 4 == 3 && odd
       # color = if cx % 2 == 0 then 0xff00ff else 0xffff00
 
-      if strobing
-        strobeBeat = beat
 
-        if doubleStrobing
-          strobeBeat = beat*2
-
-        epsilon = Math.abs(strobeBeat - Math.floor(strobeBeat) - defaultStrobePhase)
-        strobe = epsilon < defaultStrobeLength
-
-        if !strobe && cx % 2 != 0
-          color = color.setRGB(color.r * activeColorAlpha, color.g * defaultColorAlpha, color.b * defaultColorAlpha)
-
-      if activeColorStrobing
-        strobeBeat = beat
-
-        if doubleStrobing
-          strobeBeat = beat*2
-
-        epsilon = Math.abs(strobeBeat - Math.floor(strobeBeat) - activeStrobePhase)
-        strobe = epsilon < activeStrobeLength
-
-        if !strobe && cx % 2 == 0
-          color = color.setRGB(color.r * activeColorAlpha, color.g * activeColorAlpha, color.b * activeColorAlpha)
+      if odd
+        newColor = @strobe visState.vBeat, color.getHex!, visState.strobeParams.a
+        if newColor isnt void
+          # color.setHex newColor
+          color.multiplyScalar visState.strobeParams.a
+      
+      if not odd
+        newColor = @strobe visState.vBeat, color.getHex!, visState.strobeParams.b
+        if newColor isnt void
+          # color.setHex newColor
+          color.multiplyScalar visState.strobeParams.b
 
       mesh.material.color.set(color)
 
 class TranslateSequence extends Sequence
   defaultParams: -> {}
 
-  # setup: (visState) ->
-  #   visState.trisByCoord @buildBasicGridUpdater!
+  setup: (visState) ->
+    visState.trisByCoord @buildBasicGridUpdater!
 
   step: (visState) ->
     beat    = visState.vBeat
@@ -592,11 +577,7 @@ class CircleSequence extends Sequence
   defaultParams: -> {
     minHWidth: 0.5,
     maxHWidth: 3.0,
-    pulse: false,
-    strobing: false,
-    doubleStrobing: false,
-    strobePhase: 0.5,
-    strobeLength: 0.2
+    pulse: false
   }
 
   setup: (visState) ->
@@ -608,11 +589,6 @@ class CircleSequence extends Sequence
     beat8norm = (beat % 8) / 8.0
     beat8normPingPong = (if barNum % 2 == 0 then beat8norm else 1.0 - beat8norm)
     R         = 30.0
-
-    strobing = @params.strobing
-    doubleStrobing = @params.doubleStrobing
-    strobePhase = @params.strobePhase
-    strobeLength = @params.strobeLength
 
     # Radii and Colors
     # rcs     = [ [beat8norm * R, 0xff0000] ]
@@ -633,7 +609,7 @@ class CircleSequence extends Sequence
       # xAddFunc: (cx,cy) -> ...
     }
 
-    visState.trisByCoord (mesh, cx,cy) ->
+    visState.trisByCoord (mesh, cx,cy) !~>
       basicUpdater mesh, cx,cy
 
       # return unless cx % 2 == 0
@@ -644,18 +620,9 @@ class CircleSequence extends Sequence
 
       foundRc = prelude.find f, rcs
 
-      color   = if  foundRc then foundRc[1] else 0x000000
+      color   = if foundRc then foundRc[1] else 0x000000
 
-      if strobing
-        strobeBeat = beat
-        if doubleStrobing
-          strobeBeat = beat*2
-
-        epsilon = Math.abs(strobeBeat - Math.floor(strobeBeat) - strobePhase)
-        strobe = epsilon < strobeLength
-
-        if !strobe
-          color   = 0x000000
+      color = (@strobe visState.vBeat, color, visState.strobeParams.a) || color
 
       mesh.material.color.setHex color if mesh.material.color.getHex! isnt color
 
@@ -664,11 +631,7 @@ class MeteorSequence extends Sequence
     spawnWait: 1.0,
     v:        64, # per Bar
     pSign1:   0.95,
-    pChange:  0.001,
-    strobing: false,
-    doubleStrobing: false,
-    strobePhase: 0.5,
-    strobeLength: 0.2
+    pChange:  0.001
   }
 
   setup: (visState) ->
@@ -714,16 +677,7 @@ class MeteorSequence extends Sequence
       color = mesh.material.color.multiplyScalar(0.99).getHex!
       color = 0x00ffff if prelude.find ((m) -> m[0] == cx && m[1] == cy), @ms
 
-      if @params.strobing
-        strobeBeat = visState.vBeat
-        if @params.doubleStrobing
-          strobeBeat = strobeBeat*2
-
-        epsilon = Math.abs(strobeBeat - Math.floor(strobeBeat) - @params.strobePhase)
-        strobe = epsilon < @params.strobeLength
-
-        if !strobe
-          color   = 0x000000
+      color = (@strobe visState.vBeat, color, visState.strobeParams.a) || color
       
       mesh.material.color.setHex color #if mesh.material.color.getHex! isnt color
 
@@ -855,16 +809,16 @@ main = !->
     glitchPass.enabled = false
     composer.addPass( glitchPass )
 
-    effectFilm = new THREE.FilmPass(1, 1, 648, false)
-    effectFilm.renderToScren = true
-    composer.addPass(effectFilm)
+    # effectFilm = new THREE.FilmPass(1, 1, 648, false)
+    # effectFilm.renderToScren = true
+    # composer.addPass(effectFilm)
 
     passes := 
       bloom:      bloomPass
       dotScreen:  dotScreenPass
       glitch:     glitchPass
-      film:       effectFilm
-    passesOrder := [\bloom, \dotScreen, \glitch, \film]
+      # film:       effectFilm
+    passesOrder := [\bloom, \dotScreen, \glitch] #, \film]
 
     # refreshEffectPasses!
 
@@ -874,24 +828,32 @@ main = !->
     # Params GUI
 
     visStateGui := with (new dat.GUI())
-      ..add(visState, 'time').listen!
+      # ..add(visState, 'time').listen!
       ..add(visState, 'running').listen!
       ..add(visState, 'perspCam').onFinishChange onWindowResize
       # ..add(visState, 'activeSeqIndex').listen!
-      ..add(visState, 'vBarBeat').listen!
+      # ..add(visState, 'vBarBeat').listen!
       ..add(visState, 'bpm')
-      ..addFolder('triBase')
-        ..add(visState.params, 'oddExtra', -5, 5).onFinishChange rebuildTris
-        ..add(visState.params, 'staggerAB', -2, 2).onFinishChange rebuildTris
-        ..add(visState.params, 'staggerA', -2, 2).onFinishChange rebuildTris
-        ..add(visState.params, 'staggerB', -2, 2).onFinishChange rebuildTris
+      # ..addFolder('triBase')
+      #   ..add(visState.params, 'oddExtra', -5, 5).onFinishChange rebuildTris
+      #   ..add(visState.params, 'staggerAB', -2, 2).onFinishChange rebuildTris
+      #   ..add(visState.params, 'staggerA', -2, 2).onFinishChange rebuildTris
+      #   ..add(visState.params, 'staggerB', -2, 2).onFinishChange rebuildTris
       ..addFolder('effects')
         ..add(visState.params.effects, 'bloom').onFinishChange refreshEffectPasses
         ..add(visState.params.effects, 'dotScreen').onFinishChange refreshEffectPasses
         ..add(visState.params.effects, 'glitch').onFinishChange refreshEffectPasses
 
-    for seq in visState.seqs
-      folder = visStateGui.addFolder(seq.constructor.displayName)
+    addStrobeFolder = (gui, params, name) ->
+      folder = gui.addFolder(name)
+      for k,v of params
+        folder.add(params, k)
+
+    addStrobeFolder(visStateGui, visState.strobeParams.a, 'strobe A')
+    addStrobeFolder(visStateGui, visState.strobeParams.b, 'strobe B')
+
+    for seq, i in visState.seqs
+      folder = visStateGui.addFolder("#{i+1} #{seq.constructor.displayName}")
       for k,v of seq.params
         folder.add(seq.params, k)
 
@@ -928,20 +890,27 @@ main = !->
     composer.setSize canvasWidth * dpr * sampleRatio, canvasHeight * dpr * sampleRatio
   # <<onWindowResize
 
+  seqKeys = [113, 119, 101, 114, 116, 121, 117, 105, 111]
+
   onKeyPress = !(e) ->
     | e.keyCode == 32 => # Space
       visState.running = not visState.running
       e.preventDefault!
-    | e.keyCode == 84 || e.keyCode == 116 => # T
-      console.log \TTT
-      e.preventDefault!
+    # | e.keyCode == 84 || e.keyCode == 116 => # T
+    #   console.log \TTT
+    #   e.preventDefault!
     | e.keyCode == 97 =>
       visState.scheduleSequence (mod visState.activeSeqIndex-1, visState.seqs.length)
       e.preventDefault!
     | e.keyCode == 115 =>
       visState.scheduleSequence (mod visState.activeSeqIndex+1, visState.seqs.length)
       e.preventDefault!
-    # | _               => console.log \OtherKey, e.keyCode
+    | seqKeys.indexOf(e.keyCode) > -1 =>
+      seqIdx = seqKeys.indexOf(e.keyCode)
+      if seqIdx < visState.seqs.length
+        visState.scheduleSequence seqIdx
+      e.preventDefault! 
+    | _               => console.log \OtherKey, e.keyCode
     # | otherwise => console.log e.keyCode
 
   rebuildTris = !->
