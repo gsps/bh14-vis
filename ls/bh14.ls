@@ -24,6 +24,7 @@ Vis = new ->
 
     geom.faces.push new THREE.Face3( 0, 1, 2 )
     geom.computeFaceNormals!
+    geom.computeBoundingSphere!
 
     geom
 
@@ -68,6 +69,7 @@ Vis = new ->
       ..renderDepth = (cx % 2)
       # ..renderDepth = if cx == 0 then 0 else 10 #Math.random! * 1000.0
       # ..position.setZ (Math.random! / 1.0)
+      ..material.side = THREE.DoubleSide # Performance hit?
     # @newTriMesh geom
 
   @triMeshes = (callback) !->
@@ -153,14 +155,15 @@ Vis = new ->
 BEATS_PER_BAR = 4
 
 class VisState
-  (@time=0.0, @running=true, @perspCam=false, @bpm=128.0, @phase=0.0, params) ->
+  (@time=0.0, @dt=0, @running=true, @perspCam=false, @bpm=128.0, @phase=0.0, params) ->
     @clearTris!
 
     defaultParams = ({} <<< Vis.triBaseDefaultParams) <<< Vis.miscDefaultParams
     @params = defaultParams <<< (@params || {})
 
-    @seqs = [new CircleSequence(), new ShearSequence(), new TranslateSequence(), new SidestepSequence()]
-    @activeSeqIndex = 0
+    @seqs = [new MeteorSequence(), new WaveSequence(), new CircleSequence(), 
+      new ShearSequence(), new TranslateSequence(), new SidestepSequence()]
+    @activeSeqIndex = void
     # @activeSeqSetup = false
     @nextSeqIndex   = 0
     @nextSeqStart   = 0
@@ -169,11 +172,13 @@ class VisState
   step: (dt) ->
     return this unless @running
     @time += dt
+    @dt   = dt
     
     # Vis.updateTriMeshes this
     
     # Callbacks for the active sequence
     if @nextSeqIndex isnt void && @time >= @nextSeqStart
+      @seqs[@activeSeqIndex].teardown this if @activeSeqIndex isnt void
       @activeSeqIndex = @nextSeqIndex
       @seqs[@activeSeqIndex].setup this
       @nextSeqIndex = void
@@ -238,6 +243,11 @@ class VisState
     -> let f = BEATS_PER_BAR * @tpb
       @vTime / f
 
+  vBarBeatToDelta: (vBB) -> (vBB * @tpb)
+
+  vBarBeatToTime: (vBB) -> let barLen = (BEATS_PER_BAR * @tpb)
+    @vTime - (@vTime % barLen) + barLen + (vBB * @tpb)
+
 
 class Tri
   ->
@@ -259,6 +269,8 @@ class Sequence
   setup: (visState) ->
     # virtual
   step: (visState) ->
+    # virtual
+  teardown: (visState) ->
     # virtual
 
   basicGridDefaultParams: ->
@@ -371,6 +383,42 @@ class SidestepSequence extends Sequence
       
       color = defaultColor.lerp activeColor, 1.0 - (dist/1.0)
       mesh.material.color.set(color)
+
+    visState.trisByCoord updateMesh
+
+class WaveSequence extends Sequence
+  defaultParams: ->
+    rpBar: 0.5
+
+  setup: (visState) ->
+    visState.trisByCoord @buildBasicGridUpdater!
+
+  teardown: (visState) ->
+    console.log \TEARDOWN
+    visState.trisByCoord (mesh, cx,cy) ->
+      mesh.rotation.y = 0
+
+  step: (visState) ->
+    angle = visState.vBar * @params.rpBar * -2 * Math.PI
+    # beat = Math.floor(visState.vBeat)
+    beat4 = visState.vBeat % 4
+    
+    updateMesh = (mesh, cx,cy) !~>
+      return unless cx % 2 == 0
+
+      # p = (mod ((cx + 20) / 40), 1.0)
+      # p = (mod ((cx + 30) / 60), 1.0)
+      p = ((cx + 30) / 60)
+      # p = ((cx + 28) / 56)
+      return unless p > 0.0 && p < 1.0
+      # q = @beatRangeProgress beat4, p
+      q = (beat4 / 4.0 - p)
+      # q = 1.0 - (q * q)
+      q = 1.0 - q
+      # console.log beat4, q if cx == 0 and cy == 0
+      angle = -2 * Math.PI * q
+
+      mesh.rotation.y = angle
 
     visState.trisByCoord updateMesh
 
@@ -503,7 +551,60 @@ class CircleSequence extends Sequence
       foundRc = prelude.find f, rcs
       color   = if foundRc then foundRc[1] else 0x000000
 
-      mesh.material.color.setHex color if mesh.material.color.getHex isnt color
+      mesh.material.color.setHex color if mesh.material.color.getHex! isnt color
+
+class MeteorSequence extends Sequence
+  defaultParams: -> {
+    spawnWait: 1.0,
+    v:        64, # per Bar
+    pSign1:   0.95,
+    pChange:  0.001
+  }
+
+  setup: (visState) ->
+    visState.trisByCoord @buildBasicGridUpdater!
+    
+    @nextShot = void
+    @ms       = []
+    # @d        = 0
+
+  step: (visState) ->
+    beatNum = Math.floor(visState.vBeat % 4)
+    
+    if @nextShot is void || visState.vTime >= @nextShot
+      mx = Math.floor(Math.random! * 40 - 20.0)
+      my = Math.floor(Math.random! * 20 - 30.0)
+      s  = if Math.random! < @params.pSign1 then 1 else -1
+      @ms.push [mx,my,0,s]
+      # @nextShot = visState.vBarBeatToTime 0.0
+      @nextShot = visState.vTime + visState.vBarBeatToDelta @params.spawnWait
+      @nextStep = visState.vTime + visState.vBarBeatToDelta (4.0 / @params.v) 
+    
+    if visState.vTime >= @nextStep
+      for m, i in @ms
+        [mx,my,d,s] = m
+        mx += (d % 2) * s
+        d  = (d+1) % 2
+        my += d % 2
+        s *= -1 if Math.random! < @params.pChange
+        @ms[i] = [mx,my,d,s]
+      @ms = @ms.filter ([x,y,_,_]) -> Math.abs(x) < 30 && Math.abs(y) < 30
+      @nextStep = visState.vTime + visState.vBarBeatToDelta (4.0 / @params.v) 
+
+    basicUpdater = @buildBasicGridUpdater {
+      # staggerAB: (beat % 8) / 4.0 + 1.0,
+      # staggerAB: (beat % 8) / 8.0 + 1.0,
+      # staggerAB: if @params.pulse then beat8normPingPong * 0.5 + 1.1 else 1.2,
+      # xAddFunc: (cx,cy) -> ...
+    }
+
+    visState.trisByCoord (mesh, cx,cy) ~>
+      # basicUpdater mesh, cx,cy
+
+      color = mesh.material.color.multiplyScalar(0.99).getHex!
+      color = 0x00ffff if prelude.find ((m) -> m[0] == cx && m[1] == cy), @ms
+      
+      mesh.material.color.setHex color #if mesh.material.color.getHex! isnt color
 
 
 
@@ -663,7 +764,6 @@ main = !->
         ..add(visState.params.effects, 'dotScreen').onFinishChange refreshEffectPasses
         ..add(visState.params.effects, 'glitch').onFinishChange refreshEffectPasses
 
-    console.log visState.seqs[0]
     for seq in visState.seqs
       folder = visStateGui.addFolder(seq.constructor.displayName)
       for k,v of seq.params
@@ -722,6 +822,8 @@ main = !->
     scene.remove object if object?
 
     object := new THREE.Object3D()
+    # object.frustumCulled = false
+    # object.doubleSided = true
     scene.add object
 
     visState.clearTris!
